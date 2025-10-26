@@ -180,7 +180,7 @@ impl SyncSession {
         }
     }
 
-    pub fn get(&mut self, oid: &Oid) -> Result<Pdu> {
+    pub fn get(&mut self, oid: &Oid) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_get(
@@ -202,7 +202,7 @@ impl SyncSession {
         Ok(resp)
     }
 
-    pub fn getnext(&mut self, oid: &Oid) -> Result<Pdu> {
+    pub fn getnext(&mut self, oid: &Oid) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_getnext(
@@ -229,7 +229,7 @@ impl SyncSession {
         oids: &[&Oid],
         non_repeaters: u32,
         max_repetitions: u32,
-    ) -> Result<Pdu> {
+    ) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_getbulk(
@@ -253,7 +253,7 @@ impl SyncSession {
         Ok(resp)
     }
 
-    pub fn set(&mut self, values: &[(&Oid, Value)]) -> Result<Pdu> {
+    pub fn set(&mut self, values: &[(&Oid, Value)]) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_set(

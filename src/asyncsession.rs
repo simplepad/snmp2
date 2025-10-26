@@ -158,7 +158,7 @@ impl AsyncSession {
         }
     }
 
-    pub async fn get(&mut self, oid: &Oid<'_>) -> Result<Pdu> {
+    pub async fn get(&mut self, oid: &Oid<'_>) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_get(
@@ -180,7 +180,7 @@ impl AsyncSession {
         Ok(resp)
     }
 
-    pub async fn getnext(&mut self, oid: &Oid<'_>) -> Result<Pdu> {
+    pub async fn getnext(&mut self, oid: &Oid<'_>) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_getnext(
@@ -207,7 +207,7 @@ impl AsyncSession {
         oids: &[&Oid<'_>],
         non_repeaters: u32,
         max_repetitions: u32,
-    ) -> Result<Pdu> {
+    ) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_getbulk(
@@ -231,7 +231,7 @@ impl AsyncSession {
         Ok(resp)
     }
 
-    pub async fn set(&mut self, values: &[(&Oid<'_>, Value<'_>)]) -> Result<Pdu> {
+    pub async fn set(&mut self, values: &[(&Oid<'_>, Value<'_>)]) -> Result<Pdu<'_>> {
         self.prepare();
         let req_id = self.req_id.0;
         pdu::build_set(

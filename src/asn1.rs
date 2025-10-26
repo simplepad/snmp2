@@ -48,7 +48,7 @@ impl fmt::Debug for AsnReader<'_> {
 }
 
 impl<'a> AsnReader<'a> {
-    pub fn from_bytes(bytes: &[u8]) -> AsnReader {
+    pub fn from_bytes(bytes: &[u8]) -> AsnReader<'_> {
         AsnReader { inner: bytes }
     }
 
@@ -97,7 +97,7 @@ impl<'a> AsnReader<'a> {
                 }
                 bytes[(USIZE_LEN - length_len)..].copy_from_slice(&tail[..length_len]);
 
-                o = unsafe { mem::transmute::<[u8; USIZE_LEN], usize>(bytes).to_be() };
+                o = usize::from_be_bytes(bytes);
                 self.inner = &tail[length_len..];
                 Ok(o)
             }
@@ -254,16 +254,18 @@ impl<'a> AsnReader<'a> {
 }
 
 fn decode_i64(i: &[u8]) -> Result<i64> {
-    if i.len() > mem::size_of::<i64>() {
+    const I64_LEN: usize = mem::size_of::<i64>();
+
+    if i.len() > I64_LEN {
         return Err(Error::AsnIntOverflow);
     }
-    let mut bytes = [0u8; 8];
-    bytes[(mem::size_of::<i64>() - i.len())..].copy_from_slice(i);
+    let mut bytes = [0u8; I64_LEN];
+    bytes[(I64_LEN - i.len())..].copy_from_slice(i);
 
-    let mut ret = unsafe { mem::transmute::<[u8; 8], i64>(bytes).to_be() };
+    let mut ret = i64::from_be_bytes(bytes);
     {
         //sign extend
-        let shift_amount = (mem::size_of::<i64>() - i.len()) * 8;
+        let shift_amount = (I64_LEN - i.len()) * 8;
         ret = (ret << shift_amount) >> shift_amount;
     }
     Ok(ret)
