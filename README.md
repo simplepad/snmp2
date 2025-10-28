@@ -44,14 +44,14 @@ Supports:
 
 ```rust,no_run
 use std::time::Duration;
-use snmp2::{SyncSession, Value, Oid};
+use snmp2::{SyncSession, Mode, Value, Oid};
 
 let sys_descr_oid = Oid::from(&[1,3,6,1,2,1,1,1,]).unwrap();
 let agent_addr    = "198.51.100.123:161";
 let community     = b"f00b4r";
 let timeout       = Duration::from_secs(2);
 
-let mut sess = SyncSession::new_v2c(agent_addr, community, Some(timeout), 0).unwrap();
+let mut sess = SyncSession::new_v2c(agent_addr, Mode::Udp, community, Some(timeout), 0).unwrap();
 let mut response = sess.getnext(&sys_descr_oid).unwrap();
 if let Some((_oid, Value::OctetString(sys_descr))) = response.varbinds.next() {
     println!("myrouter sysDescr: {}", String::from_utf8_lossy(sys_descr));
@@ -62,7 +62,7 @@ if let Some((_oid, Value::OctetString(sys_descr))) = response.varbinds.next() {
 
 ```rust,no_run
 use std::time::Duration;
-use snmp2::{SyncSession, Oid};
+use snmp2::{SyncSession, Mode, Oid};
 
 let system_oid      = Oid::from(&[1,3,6,1,2,1,1,]).unwrap();
 let agent_addr      = "[2001:db8:f00:b413::abc]:161";
@@ -71,7 +71,7 @@ let timeout         = Duration::from_secs(2);
 let non_repeaters   = 0;
 let max_repetitions = 7; // number of items in "system" OID
 
-let mut sess = SyncSession::new_v2c(agent_addr, community, Some(timeout), 0).unwrap();
+let mut sess = SyncSession::new_v2c(agent_addr, Mode::Udp, community, Some(timeout), 0).unwrap();
 let response = sess.getbulk(&[&system_oid], non_repeaters, max_repetitions).unwrap();
 
 for (name, val) in response.varbinds {
@@ -83,7 +83,7 @@ for (name, val) in response.varbinds {
 
 ```rust,no_run
 use std::time::Duration;
-use snmp2::{SyncSession, Value, Oid};
+use snmp2::{SyncSession, Mode, Value, Oid};
 
 let syscontact_oid  = Oid::from(&[1,3,6,1,2,1,1,4,0]).unwrap();
 let contact         = Value::OctetString(b"Thomas A. Anderson");
@@ -91,7 +91,7 @@ let agent_addr      = "[2001:db8:f00:b413::abc]:161";
 let community       = b"f00b4r";
 let timeout         = Duration::from_secs(2);
 
-let mut sess = SyncSession::new_v2c(agent_addr, community, Some(timeout), 0).unwrap();
+let mut sess = SyncSession::new_v2c(agent_addr, Mode::Udp, community, Some(timeout), 0).unwrap();
 let response = sess.set(&[(&syscontact_oid, contact)]).unwrap();
 
 assert_eq!(response.error_status, snmp2::snmp::ERRSTATUS_NOERROR);
@@ -180,7 +180,7 @@ supported at all. Refer to the library documentation how to enable it.
 Authentication: SHA1, encryption: AES128-CFB
 
 ```rust,no_run
-use snmp2::{SyncSession, v3, Oid};
+use snmp2::{SyncSession, Mode, v3, Oid};
 use std::time::Duration;
 
 // the security parameters also keep authoritative engine ID and boot/time
@@ -192,7 +192,7 @@ let security = v3::Security::new(b"public", b"secure")
         privacy_password: b"secure-encrypt".to_vec(),
     });
 let mut sess =
-    SyncSession::new_v3("192.168.1.1:161", Some(Duration::from_secs(2)), 0, security).unwrap();
+    SyncSession::new_v3("192.168.1.1:161", Mode::Udp, Some(Duration::from_secs(2)), 0, security).unwrap();
 // In case if engine_id is not provided in security parameters, it is necessary
 // to call init() method to send a blank unauthenticated request to the target
 // to get the engine_id.

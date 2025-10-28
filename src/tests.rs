@@ -146,3 +146,38 @@ fn test_mib() {
     let snmp_oid2 = Oid::from_mib_name(&name).unwrap();
     assert_eq!(snmp_oid, snmp_oid2);
 }
+
+#[test]
+#[cfg(feature = "v3")]
+fn test_real() {
+    use crate::{SyncSession, Mode, v3, Oid};
+    use std::time::Duration;
+
+    // the security parameters also keep authoritative engine ID and boot/time
+    // counters. these can be either set or resolved/updated automatically.
+    let security = v3::Security::new(b"testuser", b"myauthpass")
+        .with_auth_protocol(v3::AuthProtocol::Sha1)
+        .with_auth(v3::Auth::AuthPriv {
+            cipher: v3::Cipher::Aes128,
+            privacy_password: b"myprivpass".to_vec(),
+        });
+    let mut sess =
+    SyncSession::new_v3("127.0.0.1:16100", Mode::Udp, Some(Duration::from_secs(2)), 0, security).unwrap();
+    // In case if engine_id is not provided in security parameters, it is necessary
+    // to call init() method to send a blank unauthenticated request to the target
+    // to get the engine_id.
+    sess.init().unwrap();
+    loop {
+        let res = match sess.get(&Oid::from(&[1, 3, 6, 1, 2, 1, 2, 2, 1, 2, 1]).unwrap()) {
+            Ok(r) => r,
+            // In case if the engine boot / time counters are not set in the security parameters or
+            // they have been changed on the target, e.g. after a reboot, the session returns
+            // an error with the AuthUpdated code. In this case, security parameters are automatically
+            // updated and the request should be repeated.
+            Err(crate::Error::AuthUpdated) => continue,
+            Err(e) => panic!("{}", e),
+        };
+        eprintln!("{} {:?}", res.version().unwrap(), res.varbinds);
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}

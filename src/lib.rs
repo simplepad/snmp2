@@ -27,6 +27,13 @@ const USIZE_LEN: usize = 4;
 #[cfg(target_pointer_width = "64")]
 const USIZE_LEN: usize = 8;
 
+/// SNMP connection mode
+#[derive(Debug)]
+pub enum Mode {
+    Udp,
+    Tcp,
+}
+
 /// SNMP protocol version.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(i64)]

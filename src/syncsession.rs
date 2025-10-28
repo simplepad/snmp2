@@ -1,22 +1,27 @@
 use std::{
-    io,
-    net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket},
+    io::{self, Read, Write},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream, ToSocketAddrs, UdpSocket},
     num::Wrapping,
     time::Duration,
 };
 
 use crate::{
     pdu::{self, Pdu},
-    Error, MessageType, Oid, Result, Value, Version, BUFFER_SIZE,
+    Error, MessageType, Oid, Result, Value, Version, Mode, BUFFER_SIZE,
 };
 
 #[cfg(feature = "v3")]
 use crate::v3;
 
+enum Socket {
+    Udp(UdpSocket),
+    Tcp(TcpStream),
+}
+
 /// Synchronous SNMP client
 pub struct SyncSession {
     version: Version,
-    socket: UdpSocket,
+    socket: Socket,
     community: Vec<u8>,
     req_id: Wrapping<i32>,
     send_pdu: pdu::Buf,
@@ -28,6 +33,7 @@ pub struct SyncSession {
 impl SyncSession {
     pub fn new_v1<SA>(
         destination: SA,
+        mode: Mode,
         community: &[u8],
         timeout: Option<Duration>,
         starting_req_id: i32,
@@ -38,6 +44,7 @@ impl SyncSession {
         Self::new(
             Version::V1,
             destination,
+            mode,
             community,
             timeout,
             starting_req_id,
@@ -46,6 +53,7 @@ impl SyncSession {
 
     pub fn new_v2c<SA>(
         destination: SA,
+        mode: Mode,
         community: &[u8],
         timeout: Option<Duration>,
         starting_req_id: i32,
@@ -56,6 +64,7 @@ impl SyncSession {
         Self::new(
             Version::V2C,
             destination,
+            mode,
             community,
             timeout,
             starting_req_id,
@@ -65,6 +74,7 @@ impl SyncSession {
     #[cfg(feature = "v3")]
     pub fn new_v3<SA>(
         destination: SA,
+        mode: Mode,
         timeout: Option<Duration>,
         starting_req_id: i32,
         security: v3::Security,
@@ -72,7 +82,7 @@ impl SyncSession {
     where
         SA: ToSocketAddrs,
     {
-        let mut session = Self::new(Version::V3, destination, &[], timeout, starting_req_id)?;
+        let mut session = Self::new(Version::V3, destination, mode, &[], timeout, starting_req_id)?;
         session.community = security.username.clone();
         session.security = Some(security);
         Ok(session)
@@ -81,6 +91,7 @@ impl SyncSession {
     fn new<SA>(
         version: Version,
         destination: SA,
+        mode: Mode,
         community: &[u8],
         timeout: Option<Duration>,
         starting_req_id: i32,
@@ -88,9 +99,8 @@ impl SyncSession {
     where
         SA: ToSocketAddrs,
     {
-        let socket = match destination.to_socket_addrs()?.next() {
-            Some(SocketAddr::V4(_)) => UdpSocket::bind((Ipv4Addr::new(0, 0, 0, 0), 0))?,
-            Some(SocketAddr::V6(_)) => UdpSocket::bind((Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0), 0))?,
+        let agent_address: SocketAddr = match destination.to_socket_addrs()?.next() {
+            Some(addr) => addr,
             None => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -98,9 +108,24 @@ impl SyncSession {
                 ))
             }
         };
-        socket.set_read_timeout(timeout)?;
-        socket.set_write_timeout(timeout)?;
-        socket.connect(destination)?;
+        let socket: Socket = match mode {
+            Mode::Udp => {
+                let udp_socket = match agent_address {
+                    SocketAddr::V4(_) => UdpSocket::bind((Ipv4Addr::new(0, 0, 0, 0), 0))?,
+                    SocketAddr::V6(_) => UdpSocket::bind((Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0), 0))?,
+                };
+                udp_socket.set_read_timeout(timeout)?;
+                udp_socket.set_write_timeout(timeout)?;
+                udp_socket.connect(destination)?;
+                Socket::Udp(udp_socket)
+            },
+            Mode::Tcp => {
+                let tcp_socket = TcpStream::connect(agent_address)?;
+                tcp_socket.set_read_timeout(timeout)?;
+                tcp_socket.set_write_timeout(timeout)?;
+                Socket::Tcp(tcp_socket)
+            },
+        };
         Ok(Self {
             version,
             socket,
@@ -126,17 +151,36 @@ impl SyncSession {
     }
 
     fn send_and_recv<'a>(
-        socket: &UdpSocket,
+        socket: &mut Socket,
         pdu: &pdu::Buf,
         out: &'a mut [u8],
     ) -> Result<&'a [u8]> {
-        if let Ok(_pdu_len) = socket.send(pdu) {
-            match socket.recv(out) {
-                Ok(len) => Ok(&out[..len]),
-                Err(_) => Err(Error::Receive),
-            }
-        } else {
-            Err(Error::Send)
+        eprintln!("sending {} bytes", pdu.len());
+        match socket {
+            Socket::Udp(udp_socket) => {
+                eprintln!("sending {} bytes over udp", pdu.len());
+                if let Ok(_pdu_len) = udp_socket.send(pdu) {
+                    eprintln!("bytes sent, reading response");
+                    match udp_socket.recv(out) {
+                        Ok(len) => Ok(&out[..len]),
+                        Err(_) => Err(Error::Receive),
+                    }
+                } else {
+                    Err(Error::Send)
+                }
+            },
+            Socket::Tcp(tcp_socket) => {
+                eprintln!("sending {} bytes over tcp", pdu.len());
+                if let Ok(()) = tcp_socket.write_all(pdu) {
+                    eprintln!("bytes sent, reading response");
+                    match tcp_socket.read(out) {
+                        Ok(len) => Ok(&out[..len]),
+                        Err(_) => Err(Error::Receive),
+                    }
+                } else {
+                    Err(Error::Send)
+                }
+            },
         }
     }
 
@@ -155,7 +199,7 @@ impl SyncSession {
             v3::build_init(req_id, &mut self.send_pdu);
             self.req_id += Wrapping(1);
             if let Err(e) = Pdu::from_bytes_inner(
-                Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf)?,
+                Self::send_and_recv(&mut self.socket, &self.send_pdu, &mut self.recv_buf)?,
                 Some(security),
             ) {
                 if e != Error::AuthUpdated {
@@ -193,7 +237,7 @@ impl SyncSession {
             self.security.as_ref(),
         )?;
         let resp = Pdu::from_bytes_inner(
-            Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf)?,
+            Self::send_and_recv(&mut self.socket, &self.send_pdu, &mut self.recv_buf)?,
             #[cfg(feature = "v3")]
             self.security.as_mut(),
         )?;
@@ -215,7 +259,7 @@ impl SyncSession {
             self.security.as_ref(),
         )?;
         let resp = Pdu::from_bytes_inner(
-            Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf)?,
+            Self::send_and_recv(&mut self.socket, &self.send_pdu, &mut self.recv_buf)?,
             #[cfg(feature = "v3")]
             self.security.as_mut(),
         )?;
@@ -244,7 +288,7 @@ impl SyncSession {
             self.security.as_ref(),
         )?;
         let resp = Pdu::from_bytes_inner(
-            Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf)?,
+            Self::send_and_recv(&mut self.socket, &self.send_pdu, &mut self.recv_buf)?,
             #[cfg(feature = "v3")]
             self.security.as_mut(),
         )?;
@@ -266,7 +310,7 @@ impl SyncSession {
             self.security.as_ref(),
         )?;
         let resp = Pdu::from_bytes_inner(
-            Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf)?,
+            Self::send_and_recv(&mut self.socket, &self.send_pdu, &mut self.recv_buf)?,
             #[cfg(feature = "v3")]
             self.security.as_mut(),
         )?;
